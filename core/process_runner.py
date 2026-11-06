@@ -9,6 +9,7 @@ import psutil
 
 logger = logging.getLogger("director.process_runner")
 
+_OWNER: Dict[int, Optional[str]] = {}   # pid -> mission that launched it (None outside a mission)
 _ACTIVE: Dict[int, str] = {}          # pid -> executable, for every CLI the runner currently has alive
 _ACTIVE_LOCK = threading.Lock()
 
@@ -20,9 +21,11 @@ class OperationStopped(Exception):
 _STOP = threading.local()
 
 
-def set_stop_guard(guard: Optional[Callable[[], Optional[str]]]) -> None:
-    """A guard returns a reason once the work on this thread has been stopped, otherwise None."""
+def set_stop_guard(guard: Optional[Callable[[], Optional[str]]], owner: Optional[str] = None) -> None:
+    """A guard returns a reason once the work on this thread has been stopped, otherwise None. `owner` tags every
+    CLI this thread launches, so stopping one mission kills only its own processes."""
     _STOP.guard = guard
+    _STOP.owner = owner if guard else None
 
 
 def check_stop() -> None:
@@ -82,10 +85,14 @@ class ProcessTreeRunner:
     blocked_real_cli_calls: List[List[str]] = []   # real-CLI launches refused under DIRECTOR_TESTING=1
 
     @classmethod
-    def kill_active(cls) -> List[int]:
+    def kill_active(cls, owners: Optional[List[str]] = None) -> List[int]:
         """작업 정지: kill every CLI process the runner has alive (builder/reviewer/head). Returns the pids killed."""
         killed = []
-        for pid in list(active_processes()):
+        with _ACTIVE_LOCK:
+            owned = {pid: _OWNER.get(pid) for pid in _ACTIVE}
+        for pid, owner in owned.items():
+            if owners is not None and owner not in owners:
+                continue
             try:
                 if cls.kill_process_tree(pid):
                     killed.append(pid)
@@ -93,6 +100,7 @@ class ProcessTreeRunner:
                 logger.warning(f"kill_active: pid {pid}: {exc}")
             with _ACTIVE_LOCK:
                 _ACTIVE.pop(pid, None)
+                _OWNER.pop(pid, None)
         return killed
 
     @staticmethod
@@ -230,6 +238,7 @@ class ProcessTreeRunner:
         pid = process.pid
         with _ACTIVE_LOCK:
             _ACTIVE[pid] = str(argv[0])
+            _OWNER[pid] = getattr(_STOP, "owner", None)
 
         if stdin_data is not None:
             try:
@@ -294,6 +303,7 @@ class ProcessTreeRunner:
         duration_sec = round(time.time() - start_time, 3)
         with _ACTIVE_LOCK:
             _ACTIVE.pop(pid, None)
+            _OWNER.pop(pid, None)
 
         if timed_out:
             # Terminate entire process tree using taskkill /PID <pid> /T /F

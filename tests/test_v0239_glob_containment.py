@@ -2,6 +2,7 @@
 v0.2.3.9 GLOB CANONICAL CONTAINMENT FALSE POSITIVE FIX — glob patterns are never resolved as paths;
 their static prefix is canonically checked; actual matched files are still resolved individually.
 """
+from core.db_path import get_runs_dir
 import os
 import json
 from pathlib import Path
@@ -111,5 +112,5 @@ def test_final_gate_passes_with_glob_protected_paths(isolate_provider_db):
         assert ev["canonical_containment"] == "PASS" and ev["reasons"] == []
         summary = orch.resume(run_id)
         assert summary["final_state"] == "PASS"
-        saved = json.loads((Path("runs") / run_id / "final_evidence.json").read_text(encoding="utf-8"))
+        saved = json.loads((get_runs_dir() / run_id / "final_evidence.json").read_text(encoding="utf-8"))
         assert saved["canonical_containment"] == "PASS"

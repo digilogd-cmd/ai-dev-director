@@ -735,7 +735,8 @@ def build_activity_payload(limit_missions: int = 5) -> dict:
     missions = sorted(store.all(), key=lambda m: m.get("updated_at", ""), reverse=True)
     if not _USAGE_BACKFILLED["done"]:
         try:
-            usage.backfill_from_runs(DIRECTOR_ROOT / "runs", missions)
+            from core.db_path import get_runs_dir
+            usage.backfill_from_runs(get_runs_dir(), missions)
         except Exception:
             pass
         _USAGE_BACKFILLED["done"] = True
@@ -892,7 +893,8 @@ def stop_missions(reason: str = "", mission_id: Optional[str] = None, by: str = 
     store = MissionStore()
     targets = [m for m in store.all() if m.get("status") == "RUNNING" and (not mission_id or m["mission_id"] == mission_id)]
     stopped = [stop_request(m["mission_id"], reason, by, store)["mission_id"] for m in targets]
-    killed = ProcessTreeRunner.kill_active() if stopped else []
+    # one named mission: only its own processes; "stop everything": every CLI the console has running
+    killed = ProcessTreeRunner.kill_active(owners=stopped if mission_id else None) if stopped else []
     sid = active_session_id()
     if stopped:
         ChatManager().add_message(sid, "SYSTEM", f"[{by}] 작업 정지: 미션 {', '.join(stopped)} 정지 · 실행 중이던 AI 프로세스 {len(killed)}개 종료 · 기록과 작업본은 남습니다" + (f" · 사유: {reason[:200]}" if reason else ""))
@@ -1233,7 +1235,8 @@ def build_status_payload() -> dict:
     state = raw_state
     recovered = None
     if current_run and raw_state == State.FAIL:
-        recovery_path = Path(__file__).resolve().parent / "runs" / current_run['run_id'] / "recovery.json"
+        from core.db_path import get_runs_dir
+        recovery_path = get_runs_dir() / current_run['run_id'] / "recovery.json"
         try:
             candidate = json.loads(recovery_path.read_text(encoding="utf-8"))
             if candidate.get("status") == "VERIFIED" and candidate.get("project_path") == current_run['project_path']:

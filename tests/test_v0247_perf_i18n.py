@@ -3,6 +3,7 @@ v0.2.4.7 IDLE PERFORMANCE + KOREAN UX — /status spawns no subprocess and scans
 human_action_state / result_state tables, 2 s cache, and a Korean-first presentation layer with raw codes kept
 in data-raw / Details.
 """
+from core.db_path import get_runs_dir
 import json
 import time
 import sqlite3
@@ -107,8 +108,8 @@ def test_5_6_building_and_reviewing_sentences(server, env):
 
 def test_7_human_required_display(server, env):
     _run("RUN-KO-2", [State.PLANNING, State.HUMAN_REQUIRED], details="APPROVAL_REQUIRED: SENSITIVE_FILE_IN_SCOPE (requirements.txt)")
-    Path("runs/RUN-KO-2").mkdir(parents=True, exist_ok=True)
-    (Path("runs/RUN-KO-2") / "order.json").write_text(json.dumps({"goal": "g", "allowed_paths": ["requirements.txt"], "protected_paths": []}), encoding="utf-8")
+    (get_runs_dir() / "RUN-KO-2").mkdir(parents=True, exist_ok=True)
+    ((get_runs_dir() / "RUN-KO-2") / "order.json").write_text(json.dumps({"goal": "g", "allowed_paths": ["requirements.txt"], "protected_paths": []}), encoding="utf-8")
     html = render_html()
     assert 'id="hdr-human" class="badge b-red" data-raw="HUMAN REQUIRED">사용자 확인 필요</span>' in html
     assert "사용자 승인이 필요합니다." in html and "requirements.txt" in html
@@ -128,12 +129,12 @@ def test_7_human_required_display(server, env):
 def test_8_9_pass_and_result_ready(server, env):
     _set("OPENAI", "HEALTHY", "HEAD, REVIEWER"); _set("GOOGLE", "HEALTHY", "BUILDER"); _set("ANTHROPIC", "RECOVERING", "BACKUP")
     sm = _run("RUN-KO-4", [State.PLANNING, State.ORDER_READY, State.BUILDING, State.VERIFYING, State.REVIEWING, State.DECIDING, State.PASS])
-    d = Path("runs/RUN-KO-4"); d.mkdir(parents=True, exist_ok=True)
+    d = (get_runs_dir() / "RUN-KO-4"); d.mkdir(parents=True, exist_ok=True)
     (d / "final_evidence.json").write_text(json.dumps({"reasons": [], "reviewer_verdict": "pass", "regression": "PASS", "canonical_containment": "PASS"}), encoding="utf-8")
     (d / "verification.json").write_text(json.dumps({"passed": True, "test_counts": {"passed": 3}}), encoding="utf-8")
     sm.upsert_result_state("RUN-KO-4", state="READY", changed_count=3, counts_json={"A": 1, "M": 2, "D": 0}, tests_state="PASS", reviewer_state="PASS", safety_state="PASS", worktree_state="PRESENT")
     with sqlite3.connect(str(get_db_path())) as c:
-        c.execute("UPDATE runs SET worktree_path=? WHERE run_id=?", (str(Path("runs").resolve()), "RUN-KO-4")); c.commit()
+        c.execute("UPDATE runs SET worktree_path=? WHERE run_id=?", (str(get_runs_dir()), "RUN-KO-4")); c.commit()
     st = _get_json(server, "/status")[1]
     assert st["stage_sentence"] == "작업이 완료되었습니다" and st["result"]["is_pass"] and st["result"]["changed_count"] == 3
     html = render_html()
@@ -185,7 +186,7 @@ def big_db(env):
         c.executemany("INSERT INTO state_transitions (run_id, from_state, to_state, details, timestamp) VALUES (?,?,?,?,?)",
                       [(r[0], "DECIDING", r[3], "Final decision: ok", r[6]) for r in rows])
         c.commit()
-    wt = Path("runs").resolve()
+    wt = get_runs_dir()
     for i in range(12):
         rid = f"RUN-BIGPASS-{i}"
         sm.create_run(rid, str(Path.cwd()), "g")
@@ -199,8 +200,8 @@ def big_db(env):
         sm.create_run(rid, str(Path.cwd()), "g")
         sm.transition_to(rid, State.PLANNING)
         sm.transition_to(rid, State.HUMAN_REQUIRED, details=("APPROVAL_REQUIRED: SENSITIVE_FILE_IN_SCOPE (requirements.txt)" if i < 3 else "FINAL_GATE: refused"))
-        Path(f"runs/{rid}").mkdir(parents=True, exist_ok=True)
-        (Path(f"runs/{rid}") / "order.json").write_text(json.dumps({"goal": "g", "allowed_paths": ["requirements.txt"], "protected_paths": []}), encoding="utf-8")
+        (get_runs_dir() / f"{rid}").mkdir(parents=True, exist_ok=True)
+        ((get_runs_dir() / f"{rid}") / "order.json").write_text(json.dumps({"goal": "g", "allowed_paths": ["requirements.txt"], "protected_paths": []}), encoding="utf-8")
     return sm
 
 
@@ -255,8 +256,8 @@ def test_18_status_cache_ttl(big_db):
 
 def test_19_pending_action_state_is_persisted_and_resolved(env):
     sm = _run("RUN-HA-1", [State.PLANNING, State.HUMAN_REQUIRED], details="APPROVAL_REQUIRED: SENSITIVE_FILE_IN_SCOPE (requirements.txt)")
-    Path("runs/RUN-HA-1").mkdir(parents=True, exist_ok=True)
-    (Path("runs/RUN-HA-1") / "order.json").write_text(json.dumps({"goal": "g", "allowed_paths": ["requirements.txt"], "protected_paths": []}), encoding="utf-8")
+    (get_runs_dir() / "RUN-HA-1").mkdir(parents=True, exist_ok=True)
+    ((get_runs_dir() / "RUN-HA-1") / "order.json").write_text(json.dumps({"goal": "g", "allowed_paths": ["requirements.txt"], "protected_paths": []}), encoding="utf-8")
     assert sm.stale_human_actions() == ["RUN-HA-1"]
     assert [p["run_id"] for p in dashboard_server.pending_actions()] == ["RUN-HA-1"]
     assert sm.stale_human_actions() == []                                         # classified once, persisted

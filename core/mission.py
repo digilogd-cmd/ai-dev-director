@@ -166,7 +166,7 @@ class MissionRunner:
         self.store.save(mission)
         from core import usage
         usage.set_context(mission_id=mission_id)
-        set_stop_guard(lambda: self._stop_reason(mission_id))
+        set_stop_guard(lambda: self._stop_reason(mission_id), owner=mission_id)
         try:
             while mission["status"] == "RUNNING":
                 mission = self._advance(mission)

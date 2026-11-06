@@ -8,6 +8,7 @@ Regressions found by running the real pipeline:
 import hashlib
 import json
 import os
+import time
 import subprocess
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from core.process_runner import OperationStopped, ProcessTreeRunner, set_stop_gu
 from core.research_experiment import TriadExperimentOrchestrator
 from core.result_manager import ResultManager
 from core.state_machine import State, StateMachine
+from tests.test_v301_companion_http import http_server  # noqa: F401
 from tests.test_v312_delivery import RUNS, cleanup_runs, fake_run, git, project  # noqa: F401
 
 
@@ -215,3 +217,55 @@ def test_connection_closes_after_with_and_keeps_the_commit(tmp_path):
         assert conn.execute("SELECT v FROM t").fetchone()[0] == 1
     os.unlink(db)
     assert not Path(db).exists()
+
+
+def test_stopping_one_mission_kills_only_its_own_processes():
+    import sys
+    import threading
+    from core.process_runner import active_processes
+
+    def run_as(owner):
+        set_stop_guard(lambda: None, owner=owner)
+        try:
+            ProcessTreeRunner.run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=60)
+        finally:
+            set_stop_guard(None)
+    threads = [threading.Thread(target=run_as, args=(o,), daemon=True) for o in ("MSN-A", "MSN-B")]
+    for t in threads:
+        t.start()
+    deadline = time.time() + 15
+    while len(active_processes()) < 2 and time.time() < deadline:
+        time.sleep(0.1)
+    before = set(active_processes())
+    killed = ProcessTreeRunner.kill_active(owners=["MSN-A"])
+    assert len(killed) == 1 and len(before) == 2
+    survivor = set(active_processes())
+    assert len(survivor) == 1 and survivor <= before and not (survivor & set(killed))
+    ProcessTreeRunner.kill_active()
+    for t in threads:
+        t.join(timeout=15)
+
+
+def test_runs_go_to_the_test_folder_not_the_source_tree():
+    from core.db_path import SOURCE_ROOT, get_runs_dir
+    assert get_runs_dir() != SOURCE_ROOT / "runs"
+    assert ResultManager.run_dir("RUN-X").parent == get_runs_dir()
+
+
+def test_test_runs_folder_only_applies_in_test_mode(monkeypatch):
+    from core.db_path import SOURCE_ROOT, get_runs_dir
+    monkeypatch.delenv("DIRECTOR_TESTING", raising=False)
+    assert get_runs_dir() == SOURCE_ROOT / "runs"
+
+
+def test_stalled_oversize_body_gets_a_quick_rejection(http_server):
+    import socket
+    sock = socket.create_connection(http_server.server_address, timeout=10)
+    host = b"Host: 127.0.0.1:%d\r\n" % http_server.server_address[1]
+    sock.sendall(b"POST /bridge/orders HTTP/1.1\r\n" + host + b"X-Solomon-Bridge: test-token\r\n"
+                 b"Content-Type: application/json\r\nContent-Length: 40000\r\n\r\n{\"a\":")   # then stalls
+    started = time.time()
+    reply = sock.recv(200)
+    sock.close()
+    assert reply.startswith(b"HTTP/1.") and b" 400 " in reply.split(b"\r\n")[0]
+    assert time.time() - started < 8

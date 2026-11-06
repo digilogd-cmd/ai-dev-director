@@ -58,7 +58,8 @@ class ResultManager:
     # ------------------------------------------------------------------ artifacts
     @staticmethod
     def run_dir(run_id: str) -> Path:
-        return Path(__file__).resolve().parent.parent / "runs" / run_id
+        from core.db_path import get_runs_dir
+        return get_runs_dir() / run_id
 
     def _load(self, run_id: str, name: str):
         p = self.run_dir(run_id) / name

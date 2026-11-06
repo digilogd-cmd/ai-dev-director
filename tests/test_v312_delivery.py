@@ -17,7 +17,8 @@ from core.result_manager import ResultManager
 from core.state_machine import StateMachine, State
 from tests.test_v301_companion_http import http_server, request  # noqa: F401
 
-RUNS = Path(__file__).resolve().parents[1] / "runs"
+from core.db_path import get_runs_dir
+RUNS = get_runs_dir()
 
 
 def git(cwd, *a):
