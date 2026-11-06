@@ -156,10 +156,10 @@ class ClaudeReviewer:
             "```"
         )
 
-        invocation_cmd = 'claude --print'
+        invocation_cmd = 'claude --print --strict-mcp-config'
         self.logger.info(f"[Claude Reviewer] Invoking via ProcessTreeRunner: {self.executable} in {wt}")
 
-        cmd = [self.executable, "--print"]
+        cmd = [self.executable, "--print", "--strict-mcp-config"]
         res = ProcessTreeRunner.run(
             argv=cmd,
             cwd=str(wt),
@@ -230,7 +230,7 @@ class ClaudeReviewer:
 
     def get_provenance(self, exit_code: int = 0) -> AgentProvenanceRecord:
         exec_path = str(Path(self.executable).resolve()) if self.executable else "claude"
-        invocation = self.last_execution_info.get("invocation_command", 'claude --print')
+        invocation = self.last_execution_info.get("invocation_command", 'claude --print --strict-mcp-config')
         version = self.get_version()
         duration = self.last_execution_info.get("execution_duration_sec")
         actual_exit_code = self.last_execution_info.get("exit_code")   # None when no process ran (never a default)

@@ -53,7 +53,8 @@ def test_snapshot_excludes_untracked_sensitive_directories(tmp_path):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text('{}')
     sha = snapshot(p)
-    assert git(p, 'ls-tree', '-r', '--name-only', sha) == ''
+    # Only names that look sensitive are excluded; an ordinary data/ fixture belongs in the working copy.
+    assert git(p, 'ls-tree', '-r', '--name-only', sha) == 'data/fixture.json'
 
 def test_control_root_rejected():
     from core.bootstrap import SOURCE_ROOT

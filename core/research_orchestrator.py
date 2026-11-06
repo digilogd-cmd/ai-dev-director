@@ -691,6 +691,7 @@ class ResearchOrchestrator:
         envelope = build_experiment_order_prompt(
             session["moonshot"], synthesis_rows[0]["payload"], self._project_context(session["project_path"]),
             session["project_type"], project_row["baseline_state"],
+            verification_command=self._verification_command(session["project_path"]),
         )
         prompt = persist_stage_prompt(self.rsm, session_id, cycle["cycle_id"], envelope, self.artifact_root)
         calls = self._invoke_concurrently(
@@ -725,6 +726,22 @@ class ResearchOrchestrator:
         )
         return {**self.session_summary(session_id, message="통합 가설을 안전한 실험 ORDER로 변환했습니다."),
                 "experiment": self.rsm.get_experiment(cycle["cycle_id"])}
+
+    def _experiment_settings(self) -> Dict[str, Any]:
+        if self.experiment_config is not None:
+            return self.experiment_config
+        with (SOURCE_ROOT / "config.yaml").open("r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+
+    def _verification_command(self, project_path: str) -> Any:
+        """The test command the verifier will run for this project (per-project setting first)."""
+        config = self._experiment_settings()
+        for root, settings in (config.get("projects") or {}).items():
+            if Path(root).resolve() == Path(project_path).resolve():
+                command = ((settings or {}).get("verification") or {}).get("test_command")
+                if command:
+                    return command
+        return (config.get("verification") or {}).get("test_command")
 
     def _default_experiment_orchestrator(self, project_evidence: Dict[str, Any],
                                          baseline_evidence: Optional[Dict[str, Any]]):

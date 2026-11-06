@@ -498,6 +498,8 @@ class ResultManager:
                 src = Path(m["source"])
                 if _sha(src) != m["sha256"]:
                     raise RuntimeError(f"source changed since manifest: {rel}")
+                if "target_sha256" in m and (_sha(dst) if dst.is_file() else None) != m["target_sha256"]:
+                    raise RuntimeError(f"target changed since manifest: {rel}")
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 tmp = dst.with_name(dst.name + ".director_apply_tmp")
                 shutil.copy2(src, tmp)
@@ -567,6 +569,21 @@ class ResultManager:
             rid = Path(base).name                          # a worktree is named after its run
         return None
 
+    def delivered_versions(self, run_id: str) -> Dict[str, str]:
+        """Path -> sha256 of the version an earlier run of this chain last applied to the project (newest wins)."""
+        delivered: Dict[str, str] = {}
+        seen, rid = {run_id}, run_id
+        while True:
+            snap = self._load(rid, "source_snapshot.json") or {}
+            base = snap.get("base_worktree") or (self._load(rid, "mission_base.json") or {}).get("base_worktree")
+            rid = Path(base).name if base else None
+            if not rid or rid in seen:
+                return delivered
+            seen.add(rid)
+            if (self._load(rid, "result_state.json") or {}).get("state") == RESULT_APPLIED:
+                for item in (self._load(rid, "result_manifest.json") or {}).get("files") or []:
+                    delivered.setdefault(item["path"], item["sha256"])
+
     @staticmethod
     def _git_blob_ids(root: Path, rels: List[str]) -> Dict[str, str]:
         """Blob ids exactly as git would store these working files (line-ending conversion included), in one call."""
@@ -594,6 +611,9 @@ class ResultManager:
                     if "\t" in rec:
                         meta, rel = rec.split("\t", 1)
                         origin_blobs[rel.replace("\\", "/")] = meta.split()[2]
+        # A file still exactly as this chain last applied it was not edited by the user. Any other content, even an
+        # older AI version the user went back to, counts as a user edit and conflicts.
+        delivered = self.delivered_versions(run_id)
         rc1, tracked, _ = _git(["ls-files", "-z"], str(wt_root))
         rc2, others, _ = _git(["ls-files", "--others", "--exclude-standard", "-z"], str(wt_root))
         if rc1 or rc2:
@@ -621,7 +641,7 @@ class ResultManager:
             if dst_blob is not None:
                 if dst_blob == src_blob or src_blob == origin_blob:
                     unchanged += 1; continue                 # same already, or the AIs left it alone (user's version stays)
-                if dst_blob != origin_blob:
+                if dst_blob != origin_blob and (rel not in delivered or _sha(dst) != delivered[rel]):
                     conflicts.append({"path": rel, "reason": "changed in the project since the work started"}); continue
                 kind = "M"
             else:
@@ -629,7 +649,8 @@ class ResultManager:
                     unchanged += 1; continue                 # the user deleted it meanwhile; not resurrected
                 kind = "A"
             data = src.read_bytes()
-            manifest.append({"path": rel, "type": kind, "source": str(src), "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)})
+            manifest.append({"path": rel, "type": kind, "source": str(src), "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+                             "target_sha256": _sha(dst) if dst.is_file() else None})
         present = set(candidates)
         deleted = [rel for rel in origin_blobs if rel not in present and (proj_root / rel).exists()
                    and not SafetyPolicy.is_control_plane_path(rel)]

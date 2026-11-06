@@ -9,11 +9,13 @@ final worktree. Missions are persisted so a restart continues where it stopped.
 """
 import json
 import os
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from core.process_runner import set_stop_guard
 from core import autopilot
 from core.state_machine import State, TERMINAL_STATES
 from schemas.order import OrderSchema
@@ -31,6 +33,18 @@ def default_mission_dir() -> Path:
     return get_db_path().parent / "missions"
 
 
+def _retry_while_locked(action: Callable[[], Any], attempts: int = 20, delay: float = 0.1) -> Any:
+    """On Windows, a file another thread or process (console poll, antivirus) has open cannot be replaced and can
+    refuse a read for a moment. That must not kill a mission."""
+    for attempt in range(attempts):
+        try:
+            return action()
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 class MissionStore:
     def __init__(self, base: Optional[Path] = None):
         self.base = Path(base or default_mission_dir())
@@ -39,9 +53,9 @@ class MissionStore:
         return self.base / f"{mission_id}.json"
 
     def save(self, mission: Dict[str, Any], force: bool = False) -> None:
-        """A stop request written by the operator (status STOPPED on disk) survives saves from the running mission
-        thread, which still holds a RUNNING copy in memory. Only reopen() (force=True) may clear it."""
-        if not force and mission.get("status") == "RUNNING":
+        """A stop request written by the operator (status STOPPED on disk) survives every save from the mission
+        thread, whatever status its in-memory copy holds. Only reopen() (force=True) may clear it."""
+        if not force and mission.get("status") != "STOPPED":
             current = self.load(mission["mission_id"])
             if current and current.get("status") == "STOPPED":
                 mission["status"] = "STOPPED"
@@ -49,13 +63,13 @@ class MissionStore:
                 mission["stopped_at"] = current.get("stopped_at")
         mission["updated_at"] = _now()
         self.base.mkdir(parents=True, exist_ok=True)
-        tmp = self._path(mission["mission_id"]).with_suffix(".tmp")
+        tmp = self._path(mission["mission_id"]).with_suffix(f".{uuid.uuid4().hex[:8]}.tmp")   # savers never share one
         tmp.write_text(json.dumps(mission, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        os.replace(tmp, self._path(mission["mission_id"]))
+        _retry_while_locked(lambda: os.replace(tmp, self._path(mission["mission_id"])))
 
     def load(self, mission_id: str) -> Optional[Dict[str, Any]]:
         p = self._path(mission_id)
-        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+        return json.loads(_retry_while_locked(lambda: p.read_text(encoding="utf-8"))) if p.exists() else None
 
     def all(self) -> List[Dict[str, Any]]:
         if not self.base.exists():
@@ -152,6 +166,7 @@ class MissionRunner:
         self.store.save(mission)
         from core import usage
         usage.set_context(mission_id=mission_id)
+        set_stop_guard(lambda: self._stop_reason(mission_id))
         try:
             while mission["status"] == "RUNNING":
                 mission = self._advance(mission)
@@ -160,10 +175,17 @@ class MissionRunner:
                     mission = fresh
                     break
         finally:
+            set_stop_guard(None)
             latest = self.store.load(mission_id) or mission
             latest["owner_pid"] = None
             self.store.save(latest)
         return self.store.load(mission_id)
+
+    def _stop_reason(self, mission_id: str) -> Optional[str]:
+        current = self.store.load(mission_id)
+        if current and current.get("status") == "STOPPED":
+            return current.get("blocked_reason") or "stopped"
+        return None
 
     def reopen(self, mission_id: str) -> Optional[Dict[str, Any]]:
         """A BLOCKED/INCOMPLETE mission continues (e.g. after the user approved the blocking run)."""
@@ -193,6 +215,8 @@ class MissionRunner:
             r = step["result"]
             self.notify(f"[미션 {step['index']}/{total}] 결과 {r['final_state']} - "
                         f"{self._one_line(r)}", run_id=step["run_id"])
+            if self._stop_reason(mission["mission_id"]):
+                return self.store.load(mission["mission_id"])
         result = step["result"]
         if result["final_state"] == State.PASS:
             mission["base_worktree"] = result.get("worktree_path") or mission.get("base_worktree")
@@ -395,6 +419,8 @@ class MissionRunner:
         return ", ".join(parts)
 
     def _finish(self, mission: Dict[str, Any], status: str, summary: str = "", blocked: Optional[str] = None):
+        if self._stop_reason(mission["mission_id"]):   # a stopped mission is neither completed nor applied
+            return self.store.load(mission["mission_id"])
         mission["status"] = status
         mission["summary"] = summary or mission.get("summary", "")
         mission["blocked_reason"] = blocked

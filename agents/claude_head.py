@@ -56,7 +56,7 @@ class ClaudeHead(BaseHead):
 
     def get_provenance(self, exit_code: int = 0) -> AgentProvenanceRecord:
         exec_path = str(Path(self.executable).resolve()) if self.executable else "claude"
-        invocation = self.last_execution_info.get("invocation_command", "claude --print --output-format json")
+        invocation = self.last_execution_info.get("invocation_command", "claude --print --output-format json --strict-mcp-config")
         version = self.get_version()
         duration = self.last_execution_info.get("execution_duration_sec")
         actual_exit_code = self.last_execution_info.get("exit_code")   # None when no process ran (never a default)
@@ -104,8 +104,8 @@ class ClaudeHead(BaseHead):
         if not self.executable or not Path(self.executable).exists():
             raise RuntimeError(f"CONFIG_ERROR: Official Claude Code CLI not found at: {self.executable}")
 
-        cmd = [self.executable, "--print", "--output-format", "json"]
-        invocation_desc = "claude --print --output-format json"
+        cmd = [self.executable, "--print", "--output-format", "json", "--strict-mcp-config"]
+        invocation_desc = "claude --print --output-format json --strict-mcp-config"
         self.logger.info(f"[Claude Head] Invoking CLI via ProcessTreeRunner: {self.executable} (cwd={cwd})")
 
         sanitized_env = get_sanitized_env()

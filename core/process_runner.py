@@ -13,6 +13,25 @@ _ACTIVE: Dict[int, str] = {}          # pid -> executable, for every CLI the run
 _ACTIVE_LOCK = threading.Lock()
 
 
+class OperationStopped(Exception):
+    """The operator stopped this work: nothing further may be launched or advanced on this thread."""
+
+
+_STOP = threading.local()
+
+
+def set_stop_guard(guard: Optional[Callable[[], Optional[str]]]) -> None:
+    """A guard returns a reason once the work on this thread has been stopped, otherwise None."""
+    _STOP.guard = guard
+
+
+def check_stop() -> None:
+    guard = getattr(_STOP, "guard", None)
+    reason = guard() if guard else None
+    if reason:
+        raise OperationStopped(f"OPERATION_STOPPED: {reason}")
+
+
 def active_processes() -> Dict[int, str]:
     with _ACTIVE_LOCK:
         return dict(_ACTIVE)
@@ -174,6 +193,7 @@ class ProcessTreeRunner:
         Executes a CLI command via Popen (shell=False).
         Orchestrator tracks the PID and ensures hard timeout and hang protection.
         """
+        check_stop()   # covers every retry and failover path after a stop killed the current CLI
         # Unit-test guard: under DIRECTOR_TESTING=1 a real Codex/Claude/Antigravity CLI is never launched unless the
         # test explicitly opted in (integration_cli marker sets DIRECTOR_ALLOW_REAL_CLI=1). This prevents mock tests
         # from consuming real quota or hanging for the full CLI timeout.

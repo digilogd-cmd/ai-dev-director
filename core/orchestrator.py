@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 
+from core.process_runner import check_stop
 from core.state_machine import StateMachine, State, TERMINAL_STATES
 from core.git_manager import GitManager
 from core.safety import SafetyPolicy, ScopeViolationError
@@ -572,6 +573,7 @@ class Orchestrator:
                 try:
                     builder_result = self.builder.run(attempt_order, worktree_path, builder_fn=None)
                 except Exception as e:
+                    check_stop()   # the operator killed this CLI: its failure says nothing about the provider
                     builder_result = BuilderResultSchema(status="FAILED", files_modified=[], commands_run=[],
                                                          summary="Builder raised an exception", error=f"BUILDER_EXCEPTION: {str(e)[:300]}")
                 cli_evidence = getattr(self.builder, 'last_execution_info', None)

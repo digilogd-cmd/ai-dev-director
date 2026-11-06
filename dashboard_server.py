@@ -1270,10 +1270,11 @@ def build_status_payload() -> dict:
             "usage": f"{usage}%" if usage is not None else "UNKNOWN",
             "error": str(data.get('failure_reason', 'NONE') or 'NONE'),
         }
+    unprobed = bool(providers) and preview["mode"].value == "NORMAL" and not any(d.get('version') for d in providers.values())
     payload = {
         "server_time": now.isoformat(),
         "system_mode": preview["mode"].value,
-        "system_mode_hint": _mode_hint(preview["mode"].value, preview.get("statuses", {}), preview.get("trial_candidates", [])),
+        "system_mode_hint": "providers not checked yet" if unprobed else _mode_hint(preview["mode"].value, preview.get("statuses", {}), preview.get("trial_candidates", [])),
         "recovery_trial": _recovery_trial_line(preview, providers),
         "recovery_short": recovery["short"],
         "recovery_short_ko": recovery.get("short_ko") or recovery["short"],
@@ -1295,7 +1296,7 @@ def build_status_payload() -> dict:
         "project_name": Path((session.get("project_path") or "").strip()).name if (session.get("project_path") or "").strip() else "",
         "head_busy": chat_in_flight(),
         "activity": _node_activity(state, prov_out),
-        "system_mode_sentence": I18N.mode_sentence(preview["mode"].value, preview.get("statuses", {})),
+        "system_mode_sentence": "아직 AI 상태를 확인하지 않았습니다. 첫 작업을 시작할 때 확인합니다." if unprobed else I18N.mode_sentence(preview["mode"].value, preview.get("statuses", {})),
         "stage_sentence": I18N.stage_sentence(state, {d: prov_out[d]["role"] for d in prov_out}),
         "next_step": I18N.NEXT_STEP.get(state, ""),
         "approval": approval_info(current_run['run_id'], raw_state, last_details) if current_run else {"required": False},
