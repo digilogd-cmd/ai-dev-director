@@ -21,8 +21,11 @@ def test_zero_write_budget_empty_scope_is_auto_runnable():
     assert SafetyPolicy.assess_order_for_auto_run(_ro_order()) == []
 
 
-def test_zero_write_budget_whole_repo_scope_is_auto_runnable():
-    assert SafetyPolicy.assess_order_for_auto_run(_ro_order(allowed_paths=["."])) == []
+def test_zero_write_budget_whole_repo_scope_is_not_ambiguous_but_stays_protected():
+    # The exemption narrows AMBIGUOUS_SCOPE only; every other gate must still fire (see the module docstring).
+    reasons = SafetyPolicy.assess_order_for_auto_run(_ro_order(allowed_paths=["."]))
+    assert not any(r.startswith("AMBIGUOUS_SCOPE") for r in reasons)
+    assert any(r.startswith("PROTECTED_PATH_IN_SCOPE") for r in reasons)
 
 
 def test_nonzero_write_budget_empty_scope_still_ambiguous():

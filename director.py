@@ -124,7 +124,7 @@ def do(goal: str, project: Optional[str], profile: Optional[str], no_apply: bool
     except Exception as exc:
         click.echo(f"8081 companion unavailable ({str(exc)[:120]}); running the mission in this process instead.")
     ctx = click.get_current_context()
-    ctx.invoke(mission, project=str(Path(target).resolve()), goal=goal, mission_id=None, max_steps=None, replan=None, profile=profile)
+    ctx.invoke(mission, project=str(Path(target).resolve()), goal=goal, mission_id=None, max_steps=None, replan=None, profile=profile, no_apply=no_apply)
 
 
 @cli.command()
@@ -134,8 +134,9 @@ def do(goal: str, project: Optional[str], profile: Optional[str], no_apply: bool
 @click.option("--max-steps", type=int, help="Milestone budget for a new mission (default: autonomy.max_steps)")
 @click.option("--replan", help="With --mission-id: send the blocked step back to HEAD planning, with this reason")
 @click.option("--profile", type=click.Choice(["quick", "standard", "deep"]), default=None, help="Budget profile for a new mission")
+@click.option("--no-apply", is_flag=True, help="Keep the result in the worktree instead of applying it to the project.")
 def mission(project: str, goal: str, mission_id: Optional[str], max_steps: Optional[int], replan: Optional[str] = None,
-            profile: Optional[str] = None):
+            profile: Optional[str] = None, no_apply: bool = False):
     """Run a goal-driven mission: HEAD plans milestones and decides on your behalf until the goal is done."""
     from core import autopilot
     from core.chat_manager import ChatManager
@@ -145,6 +146,8 @@ def mission(project: str, goal: str, mission_id: Optional[str], max_steps: Optio
     config = load_config()
     if max_steps:
         config.setdefault("autonomy", {})["max_steps"] = max_steps
+    if no_apply:
+        config.setdefault("autonomy", {})["auto_apply"] = "off"
     project = str(prepare_project(project))
     try:
         from dashboard_server import active_session_id
@@ -184,6 +187,10 @@ def mission(project: str, goal: str, mission_id: Optional[str], max_steps: Optio
         mission_id = runner.create(project, goal, gate["order"], config=config, notes=gate["notes"], profile=profile, source="cli")["mission_id"]
         notify(f"미션 시작 {mission_id}")
     else:
+        if no_apply:
+            existing = runner.store.load(mission_id)
+            existing["auto_apply"] = "off"
+            runner.store.save(existing)
         if max_steps:
             existing = runner.store.load(mission_id)
             existing["max_steps"] = max(max_steps, len(existing["steps"]) + 1)
@@ -259,6 +266,42 @@ def _print_summary(summary: dict):
     else:
         click.secho(f"FAIL ({final_state})", fg="red", bold=True)
     click.echo("=" * 36 + "\n")
+
+@cli.command()
+@click.option("--project", "-p", required=True, help="Target project root directory")
+@click.option("--goal", "-g", required=True, help="The research question")
+@click.option("--new-project", is_flag=True, help="The folder is an empty new project (no baseline tests to run).")
+@click.option("--allow-degraded", is_flag=True, help="Accept running with two of the three AIs if one is unavailable.")
+def research(project: str, goal: str, new_project: bool, allow_degraded: bool):
+    """Run one TRIAD research cycle: independent research, cross-critique, synthesis, experiment, interpretation, memory.
+
+    This makes about 15-20 subscription CLI calls."""
+    from core.bootstrap import prepare_project
+    from core.mission import MissionStore, _same_path
+    from core.research_orchestrator import ResearchOrchestrator
+
+    project = str(prepare_project(project))
+    busy = [m["mission_id"] for m in MissionStore().all()
+            if m.get("status") == "RUNNING" and _same_path(m.get("project_path", ""), project)]
+    if busy:
+        click.secho(f"A mission is running on this project: {', '.join(busy)}. Stop it or wait for it first.", fg="red")
+        sys.exit(1)
+    orch = ResearchOrchestrator()
+    result = orch.start_session(project, goal, cycle_budget=1, allow_degraded=allow_degraded, new_project=new_project)
+    session_id = result["session_id"]
+    click.echo(f"TRIAD session {session_id}: {result.get('message')}")
+    for run_stage in (orch.run_through_synthesis, orch.plan_experiment, orch.execute_experiment,
+                      orch.run_result_interpretation, orch.run_interpretation_cross_critique,
+                      orch.consolidate_research_memory):
+        if result.get("human_required"):
+            break
+        result = run_stage(session_id)
+        click.echo(f"[{result.get('current_stage')}] {result.get('message')}")
+    if result.get("human_required"):
+        click.secho(f"Stopped for a human decision: {result.get('message')}", fg="yellow")
+        sys.exit(1)
+    click.secho(f"TRIAD cycle finished: {result.get('current_stage')}", fg="green")
+
 
 @cli.command("clean-worktrees")
 @click.option("--project", "-p", required=True, help="Target project root directory")

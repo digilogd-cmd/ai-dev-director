@@ -93,6 +93,20 @@ def project_registry() -> list:
 
 
 class CompanionHandler(d.DashboardHandler):
+    def _discard_body(self, size: int) -> None:
+        """Read a body we are about to reject: closing the socket with unread data resets the connection on Windows,
+        and the client then never sees the error. Bounded in size and time, so a client that stalls cannot hold
+        the handler; anything larger is simply cut off."""
+        if not 0 < size <= 65536:
+            return
+        self.connection.settimeout(2)
+        try:
+            self.rfile.read(size)
+        except OSError:
+            pass
+        finally:
+            self.connection.settimeout(None)
+
     def do_GET(self):
         if not d.is_request_origin_allowed(self.headers, self.server.server_address[1])[0]:
             return self._send_json({'error': 'local requests only'}, 403)
@@ -221,6 +235,7 @@ class CompanionHandler(d.DashboardHandler):
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if not 0 < size <= 32000 or self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+                    self._discard_body(size)
                     raise ValueError('JSON request required')
                 payload = json.loads(self.rfile.read(size))
                 if not isinstance(payload, dict):
@@ -257,6 +272,7 @@ class CompanionHandler(d.DashboardHandler):
             try:
                 size = int(self.headers.get('Content-Length', '0'))
                 if not 0 < size <= 32000:
+                    self._discard_body(size)
                     raise ValueError('request size rejected')
                 if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                     raise ValueError('JSON required')

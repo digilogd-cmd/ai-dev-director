@@ -1,6 +1,7 @@
 """
 v0.2.3.4 RESUME PARITY & WINDOWS FINAL BLOCKER FIX — tests A..S.
 """
+from core.db_path import get_runs_dir
 import os
 import sys
 import json
@@ -127,7 +128,7 @@ def test_d_resume_safety_cap_clamp(isolate_provider_db):
                 (Path(wt_) / "src" / f"f{i}.py").write_text("x = 1\n", encoding="utf-8")
             return []
         summary = orch.resume(run_id, builder_fn=builder)
-        saved = json.loads((Path("runs") / run_id / "order.json").read_text(encoding="utf-8"))
+        saved = json.loads((get_runs_dir() / run_id / "order.json").read_text(encoding="utf-8"))
         assert saved["max_files_changed"] == 4 and saved["max_diff_lines"] == 120
         actions = [r["action"] for r in sm._get_conn().execute("SELECT action FROM audit_logs WHERE run_id=?", (run_id,)).fetchall()]
         assert "SAFETY_CAP_APPLIED" in actions
@@ -141,13 +142,13 @@ def test_e_resume_baseline_failure_blocks_builder(isolate_provider_db):
     calls = []
     with make_git_project() as proj:
         run_id, wt, sm = _stuck_run(proj, State.ORDER_READY, OrderSchema(goal="g", allowed_paths=["src/"]))
-        assert not (Path("runs") / run_id / "baseline_verification.json").exists()
+        assert not (get_runs_dir() / run_id / "baseline_verification.json").exists()
         orch = _mock_orch(verification={"test_command": f'{sys.executable} -c "import sys; print(\'1 failed\'); sys.exit(1)"'})
         summary = orch.resume(run_id, builder_fn=lambda b, o, w: calls.append(w) or [])
     assert summary["final_state"] == State.HUMAN_REQUIRED
     assert calls == []
     assert any("BASELINE_FAILED" in (t["details"] or "") for t in sm.get_transitions(run_id))
-    assert (Path("runs") / run_id / "baseline_verification.json").exists()   # measured, not defaulted
+    assert (get_runs_dir() / run_id / "baseline_verification.json").exists()   # measured, not defaulted
 
 
 # ------------------------------------------------------------------ TEST F: resume baseline PASS -> build -> regression, same as fresh run
@@ -168,7 +169,7 @@ def test_f_resume_full_pipeline_regression(isolate_provider_db):
             (Path(wt_) / "tests" / "test_x.py").write_text("def test_1(): pass\n", encoding="utf-8")
             return ["tests/test_x.py"]
         summary = orch.resume(run_id, builder_fn=deleting_builder)
-        base = json.loads((Path("runs") / run_id / "baseline_verification.json").read_text(encoding="utf-8"))
+        base = json.loads((get_runs_dir() / run_id / "baseline_verification.json").read_text(encoding="utf-8"))
         assert base["test_counts"]["passed"] == 2                       # baseline measured before the build
         assert summary["final_state"] == State.HUMAN_REQUIRED
         details = " ".join((t["details"] or "") for t in sm.get_transitions(run_id))
@@ -254,7 +255,7 @@ def test_h_resume_reviewer_exception(isolate_provider_db):
     assert sm.get_run(run_id)["current_state"] != State.REVIEWING
     actions = [r["action"] for r in sm._get_conn().execute("SELECT action FROM audit_logs WHERE run_id=?", (run_id,)).fetchall()]
     assert "REVIEWER_EXCEPTION" in actions
-    prov = json.loads((Path("runs") / run_id / "provenance.json").read_text(encoding="utf-8"))
+    prov = json.loads((get_runs_dir() / run_id / "provenance.json").read_text(encoding="utf-8"))
     assert any(r.get("agent") == "REVIEWER" and r.get("exit_code") == 1 for r in prov["records"])
 
 

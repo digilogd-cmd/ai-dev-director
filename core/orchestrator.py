@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 
+from core.process_runner import check_stop
 from core.state_machine import StateMachine, State, TERMINAL_STATES
 from core.git_manager import GitManager
 from core.safety import SafetyPolicy, ScopeViolationError
@@ -104,8 +105,8 @@ class Orchestrator:
         return CodexReviewer(provider="openai", model=model, executable=executable, timeout=timeout, no_progress_timeout=no_progress_timeout, heartbeat_interval=heartbeat_interval)
 
     def _get_run_dir(self, run_id: str) -> Path:
-        base_dir = Path(__file__).resolve().parent.parent
-        run_dir = base_dir / "runs" / run_id
+        from core.db_path import get_runs_dir
+        run_dir = get_runs_dir() / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "logs").mkdir(exist_ok=True)
         return run_dir
@@ -572,6 +573,7 @@ class Orchestrator:
                 try:
                     builder_result = self.builder.run(attempt_order, worktree_path, builder_fn=None)
                 except Exception as e:
+                    check_stop()   # the operator killed this CLI: its failure says nothing about the provider
                     builder_result = BuilderResultSchema(status="FAILED", files_modified=[], commands_run=[],
                                                          summary="Builder raised an exception", error=f"BUILDER_EXCEPTION: {str(e)[:300]}")
                 cli_evidence = getattr(self.builder, 'last_execution_info', None)

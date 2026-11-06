@@ -15,6 +15,7 @@ Principle mirrored from core/state_machine.py: only a ResearchOrchestrator (adde
 changes research state; this class is the mechanism, not a policy decision-maker.
 """
 import sqlite3
+from core.db_path import connect_db
 import json
 from datetime import datetime
 from pathlib import Path
@@ -86,7 +87,7 @@ class ResearchStateMachine:
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+        conn = connect_db(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         return conn
 

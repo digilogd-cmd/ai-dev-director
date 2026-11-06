@@ -56,12 +56,11 @@ pay-per-use API call.
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q            # 596개 테스트, CLI 없이 스텁으로 돕니다 (약 25분)
+python -m pytest -q            # CLI 없이 스텁으로 돕니다 (약 12~25분)
 ```
 
-2026-11-04 기준 593개 통과, 3개 실패. 실패 3개는 알려진 드리프트입니다: 두 개는 "저장소가 아닌 폴더는 거부"를
-기대하는 옛 UI 테스트인데 v3.0부터 빈 폴더도 자동 준비(greenfield)하도록 바뀌었고, 하나는 스냅샷 제외 목록 픽스처
-드리프트입니다. 안전 게이트·정책·미션 테스트는 모두 통과합니다.
+`TEMP`나 `TMPDIR`이 긴 경로를 가리키면 일부 TRIAD 테스트가 Windows 경로 길이 제한(260자)에 걸립니다.
+그럴 때는 짧은 임시 경로로 실행하세요 (`--basetemp=D:\t\p`, `TMPDIR=D:\t`).
 
 콘솔 켜기 (윈도우):
 
@@ -76,6 +75,7 @@ CLI로 바로 한 번 돌리기:
 python director.py run -p D:/work/my_project -g "src/calc.py에 add(a, b)를 만들고 테스트를 추가해"
 python director.py mission -p D:/work/my_project -g "회원가입 흐름을 끝까지 구현"
 python director.py do -g "로그인 버그 고쳐" --profile quick     # 미션 + 자동 반영을 한 번에
+python director.py research -p D:/work/new_idea --new-project -g "연구 질문"   # TRIAD 1사이클, CLI 호출 약 15~20회
 python director.py status
 python director.py clean-worktrees -p D:/work/my_project --dry-run
 ```
@@ -92,7 +92,7 @@ python director.py clean-worktrees -p D:/work/my_project --dry-run
 ## 구조 (Layout)
 
 ```
-director.py            CLI 진입점 (run / mission / do / status / resume / clean-worktrees)
+director.py            CLI 진입점 (run / mission / do / research / status / resume / clean-worktrees)
 companion_server.py    8081 콘솔 서버 (정적 파일 허용 목록 + /ops/* API)
 dashboard_server.py    작업실(/classic)·채팅·미션 정지·상태 요약
 agents/                HEAD / BUILDER / REVIEWER 어댑터 (claude, codex, antigravity, google 역할, mock)
@@ -101,7 +101,7 @@ core/                  orchestrator, mission, autopilot(정책), safety(Scope Gu
 schemas/               ORDER / BuilderResult / ReviewResult / Decision / Provenance (pydantic)
 console/               TRINITY 무대와 작업실 프런트엔드 (의존성 없는 정적 파일)
 scripts/               폴더 선택 도우미, CLI 진단, 실패 run 재시도, 역할 smoke
-tests/                 596 tests (스텁 CLI로 격리, 로컬 설정 파일에 의존하지 않음; 실제 CLI 통합은 -m integration_cli 로 opt-in)
+tests/                 스텁 CLI로 도는 테스트 (격리, 로컬 설정 파일에 의존하지 않음; 실제 CLI 통합은 -m integration_cli 로 opt-in)
 docs/                  설계·마일스톤 기록
 ```
 

@@ -1,6 +1,7 @@
 """
 v0.2.3.5 RESUME FINAL SAFETY CLOSURE — tests A..H.
 """
+from core.db_path import get_runs_dir
 import os
 import sys
 import json
@@ -52,14 +53,14 @@ def test_a_building_without_baseline_is_not_remeasured(isolate_provider_db, tmp_
         run_id, wt, sm = _stuck_run(proj, State.BUILDING, order)
         # the builder already damaged the worktree: one test removed
         (Path(wt) / "tests" / "test_x.py").write_text("def test_1(): pass\n", encoding="utf-8")
-        assert not (Path("runs") / run_id / "baseline_verification.json").exists()
+        assert not (get_runs_dir() / run_id / "baseline_verification.json").exists()
         calls = []
         orch = _mock_orch(verification={"test_command": PYTEST_CMD})
         summary = orch.resume(run_id, builder_fn=lambda b, o, w: calls.append(w) or [])
         assert summary["final_state"] == State.HUMAN_REQUIRED
         assert "BASELINE_MISSING" in _details(sm, run_id)
         assert calls == []                                                  # no further builder stage
-        assert not (Path("runs") / run_id / "baseline_verification.json").exists()   # modified tree never became a baseline
+        assert not (get_runs_dir() / run_id / "baseline_verification.json").exists()   # modified tree never became a baseline
         assert "BASELINE_MEASURED" not in _audit(sm, run_id)
     finally:
         ctx.__exit__(None, None, None)
@@ -81,7 +82,7 @@ def test_b_building_with_persisted_baseline_is_reused(isolate_provider_db):
             return ["tests/test_y.py"]
         summary = orch.resume(run_id, builder_fn=adding)
         assert summary["final_state"] == State.PASS
-        assert json.loads((Path("runs") / run_id / "baseline_verification.json").read_text(encoding="utf-8"))["marker"] == "persisted"
+        assert json.loads((get_runs_dir() / run_id / "baseline_verification.json").read_text(encoding="utf-8"))["marker"] == "persisted"
         assert "BASELINE_MEASURED" not in _audit(sm, run_id)
 
         # persisted baseline with fewer tests than post-build is respected as the reference (regression detection)

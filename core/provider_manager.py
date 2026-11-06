@@ -116,6 +116,7 @@ class FailoverMode(str, Enum):
     STOP = "STOP"              # 1 or 0 providers healthy (stop autonomous run)
 
 import sqlite3
+from core.db_path import connect_db
 import time
 from datetime import datetime
 from pathlib import Path
@@ -146,7 +147,7 @@ class ProviderManager:
         self._sync_from_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = connect_db(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 

@@ -1,4 +1,5 @@
 import sqlite3
+from core.db_path import connect_db
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -45,7 +46,7 @@ class StateMachine:
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = connect_db(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -194,6 +195,9 @@ class StateMachine:
         return new_state in allowed
 
     def transition_to(self, run_id: str, new_state: str, details: Optional[str] = None) -> None:
+        if new_state not in (State.FAIL, State.HUMAN_REQUIRED, State.TIMEOUT):
+            from core.process_runner import check_stop
+            check_stop()   # a stopped run may still end, but may not advance or PASS
         run = self.get_run(run_id)
         if not run:
             raise ValueError(f"Run {run_id} does not exist.")

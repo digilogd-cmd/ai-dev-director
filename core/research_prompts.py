@@ -252,7 +252,7 @@ def build_synthesis_prompt(user_challenge: str, proposals: Dict[str, Dict[str, A
 
 def build_experiment_order_prompt(user_challenge: str, synthesis: Dict[str, Any],
                                   project_context: Dict[str, Any], project_type: str,
-                                  baseline_state: str) -> Dict[str, Any]:
+                                  baseline_state: str, verification_command: Any = None) -> Dict[str, Any]:
     """Ask Codex HEAD to translate a synthesis into a safety-bounded NORMAL OrderSchema."""
     if not synthesis or not synthesis.get("synthesized_hypothesis"):
         raise ValueError("experiment planning requires persisted synthesis evidence")
@@ -265,6 +265,7 @@ def build_experiment_order_prompt(user_challenge: str, synthesis: Dict[str, Any]
         "project_context": project_context,
         "project_type": project_type,
         "baseline_state": baseline_state,
+        "verification_command": verification_command,
         "output_contract": {
             "goal": "string", "allowed_paths": ["relative/exact-file"], "protected_paths": ["relative/path"],
             "acceptance_criteria": ["string"], "max_files_changed": 4, "max_diff_lines": 400,
@@ -277,7 +278,9 @@ def build_experiment_order_prompt(user_challenge: str, synthesis: Dict[str, Any]
             "acceptance_criteria, max_files_changed, max_diff_lines, allowed_deletions, context, risk_level, "
             "requires_human_approval. Use relative repository paths only. Do not weaken protected paths, "
             "request broad filesystem access, skip tests, or claim GREENFIELD is a baseline PASS. Include "
-            "post-build tests in the acceptance criteria. For a GREENFIELD experiment, select only one narrow "
+            "post-build tests in the acceptance criteria. The Director verifies the experiment only by running "
+            "verification_command: every test must be placed where that exact command collects it, because a run "
+            "that collects no tests fails. For a GREENFIELD experiment, select only one narrow "
             "mechanism from the synthesis: enumerate at most four exact file paths (no directory or glob scope), "
             "use at most six acceptance criteria, set max_files_changed no higher than 4 and max_diff_lines no "
             "higher than 400, and do not design a production framework or attempt every synthesized feature. "
@@ -407,7 +410,9 @@ def build_research_memory_prompt(synthesis: Dict[str, Any], experiment: Dict[str
         },
         "instructions": (
             "Create a compact evidence-grounded research memory. Do not use majority vote and do not erase "
-            "negative results. Return JSON with: hypothesis, why_tried, result "
+            "negative results. The hypothesis field must be an exact character-for-character copy of "
+            "synthesis.synthesized_hypothesis: the tested hypothesis is a recorded fact, so never rephrase it. "
+            "Return JSON with: hypothesis, why_tried, result "
             "(supported/rejected/inconclusive), lesson, rejected_ideas, negative_evidence, do_not_repeat, "
             "open_questions, next_direction, milestone_complete, no_progress. Mark no_progress only when the "
             "evidence provides no defensible next experiment. The output_contract is strict: string fields are "

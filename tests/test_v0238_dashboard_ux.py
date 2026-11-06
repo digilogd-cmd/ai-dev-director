@@ -188,7 +188,8 @@ def test_f_legacy_form_post_and_project_json(server, env, monkeypatch):
     monkeypatch.setattr(dashboard_server, "handle_chat_message", SlowHead(env, delay=0.0))
     code, _ = _post(server, "/chat", {"message": "legacy"}, json_mode=False)
     assert code == 200                                                  # urllib followed the 303 to '/'
-    code, j = _post(server, "/project", {"path": "C:/definitely/not/a/git/repo"})
+    from core.bootstrap import SOURCE_ROOT   # any other folder is now prepared automatically; the control root never is
+    code, j = _post(server, "/project", {"path": str(SOURCE_ROOT)})
     assert code == 200 and j["status"] == "rejected" and "PROJECT_SELECTION_REJECTED" in j["message"]
     code, j = _post(server, "/chat", {"message": ""})
     assert code == 200 and j["status"] == "empty"

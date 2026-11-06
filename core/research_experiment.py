@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from typing import Any, Dict, Optional
 
 from core.greenfield import (
@@ -56,6 +57,23 @@ class TriadExperimentOrchestrator(Orchestrator):
             return None
         return data
 
+    @staticmethod
+    def _same_content_as(worktree_path: str, head: Optional[str], expected: Optional[str]) -> bool:
+        """True when head is the qualified commit, or the private snapshot of it that core.bootstrap makes for every
+        worktree: its only parent is the qualified commit and its tree is unchanged."""
+        if not head or not expected:
+            return False
+        if head == expected:
+            return True
+
+        def rev(spec):
+            r = subprocess.run(["git", "rev-parse", "--verify", spec], cwd=str(worktree_path),
+                               capture_output=True, text=True)
+            return r.stdout.strip() if r.returncode == 0 else None
+        tree = rev(f"{head}^{{tree}}")
+        return (rev(f"{head}^1") == expected and rev(f"{head}^2") is None
+                and tree is not None and tree == rev(f"{expected}^{{tree}}"))
+
     def run_baseline_if_required(self, run_id: str, worktree_path: str, logger, provenance_records,
                                  force: bool = False, allow_measure: bool = True):
         if not self._triad_greenfield_baseline and not self._triad_project_evidence:
@@ -80,7 +98,7 @@ class TriadExperimentOrchestrator(Orchestrator):
         expected_head = self._triad_project_evidence.get("head_commit")
         if (
             fresh.get("project_type") != PROJECT_TYPE_GREENFIELD
-            or fresh.get("head_commit") != expected_head
+            or not self._same_content_as(worktree_path, fresh.get("head_commit"), expected_head)
         ):
             msg = "GREENFIELD_BASELINE_INVALID: worktree no longer matches qualified empty-project evidence"
             return None, self._stop(

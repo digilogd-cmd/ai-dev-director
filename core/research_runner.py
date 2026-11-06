@@ -62,7 +62,7 @@ class TriadResearchRunner:
             # Windows where synthesis/cross-critique evidence can exceed CreateProcess' command-line limit.
             return [executable, "exec", "--sandbox", "read-only", "-"], prompt, "codex exec --sandbox read-only - <stdin>"
         if domain == "ANTHROPIC":
-            return [executable, "--print", "--output-format", "json"], prompt, "claude --print --output-format json"
+            return [executable, "--print", "--output-format", "json", "--strict-mcp-config"], prompt, "claude --print --output-format json --strict-mcp-config"
         if domain == "GOOGLE":
             # Official AGY stream-json mode reads NDJSON from stdin. This avoids Windows command-line limits
             # without file-read tools or permission bypasses, and exposes an explicit final result event.
@@ -86,6 +86,10 @@ class TriadResearchRunner:
             return True
         if message.startswith("TIMEOUT:"):
             return True
+        lowered = message.lower()
+        if any(evidence in lowered for evidence in ("wsarecv", "connection attempt failed", "connection reset",
+                                                    "tls handshake timeout", "i/o timeout")):
+            return True    # the network dropped mid-request: the provider never judged the prompt
         return ErrorCategory.classify(message) == ErrorCategory.TIMEOUT
 
     def _invoke_once(self, domain: str, prompt: str, cwd: str, stage: str) -> Dict[str, Any]:

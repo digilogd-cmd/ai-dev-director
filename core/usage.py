@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sqlite3
+from core.db_path import connect_db
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -75,7 +76,7 @@ def reported_tokens(provider: str, stdout: str, stderr: str) -> Optional[Dict[st
 
 def _conn() -> sqlite3.Connection:
     from core.db_path import get_db_path
-    conn = sqlite3.connect(str(get_db_path()), timeout=10)
+    conn = connect_db(get_db_path(), timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE IF NOT EXISTS ai_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, ended_at TEXT, status TEXT NOT NULL,

@@ -5,6 +5,16 @@ import tempfile
 import sqlite3
 import pytest
 
+import atexit
+import shutil
+
+# Run evidence written by the suite goes to a private folder instead of <repo>/runs (set before any test module
+# computes a runs path at import time).
+_RUNS_DIR = tempfile.mkdtemp(prefix="director_runs_")
+os.environ["TEST_RUNS_DIR"] = _RUNS_DIR
+os.environ["DIRECTOR_TESTING"] = "1"   # the per-test fixture sets it too; this covers paths computed at import
+atexit.register(shutil.rmtree, _RUNS_DIR, True)
+
 from core.db_path import DEFAULT_DB_PATH
 
 
