@@ -75,6 +75,7 @@ autonomy:
   waive_scope_caps: false
   builder_attempts: 3          # retry with feedback; the last attempt moves to another provider
   max_steps: 6                 # milestones per mission
+  max_ai_calls: 36             # every AI call of a mission counts (failed ones too); the mission stops at the limit and keeps its work. 0 = no limit
   max_consecutive_failures: 3
   resume_on_start: false       # true: a companion restart continues interrupted (RUNNING) missions on its own
   # A finished mission is applied to the project on its own:
@@ -83,9 +84,9 @@ autonomy:
   # Default "off": you press 반영 after looking at the result.
   auto_apply: "off"
   profiles:                    # budgets per request size; gates and Scope Guard are the same in every profile
-    quick:    {max_steps: 2, max_repairs: 1, builder_attempts: 2}
-    standard: {max_steps: 6, max_repairs: 3, builder_attempts: 3}
-    deep:     {max_steps: 12, max_repairs: 3, builder_attempts: 3}
+    quick:    {max_steps: 2, max_repairs: 1, builder_attempts: 2, max_ai_calls: 12}
+    standard: {max_steps: 6, max_repairs: 3, builder_attempts: 3, max_ai_calls: 36}
+    deep:     {max_steps: 12, max_repairs: 3, builder_attempts: 3, max_ai_calls: 72}
 
 # Optional external commissioner (a separate "CEO" service that posts goal-level missions to /ops/solomon).
 # Only git projects under allowed_roots may be targeted; the Director's own folder is never a target.

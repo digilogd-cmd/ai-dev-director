@@ -90,6 +90,10 @@ class ErrorCategory(str, Enum):
             "502 bad gateway",
             "503 service unavailable",
             "provider unavailable",
+            "model_not_found",
+            "model_not_in_accessible_catalog",
+            "is not supported when using",
+            "does not have access to model",
             "502",
             "503"
         ]):

@@ -119,7 +119,12 @@ class TriadResearchRunner:
             # the final document is ready.  A no-output watchdog would kill a
             # healthy long critique; the hard timeout still bounds and tree-kills
             # the process. Codex and AGY retain the progress watchdog.
-            no_output_timeout=None if normalized == "ANTHROPIC" else self.no_output_timeout,
+            # agy is silent while the model reasons before its first token. Measured 2026-11-28 with a mission-sized
+            # prompt (62k chars, three calls in a row): 131 s, 141 s and 163 s of silence, then a normal answer each
+            # time. The old 180 s limit killed such calls mid-thought and started them over (12 of 21 Builder calls
+            # in two missions). agy gets 360 s of silence; the Builder's overall timeout still bounds the call.
+            no_output_timeout=(None if normalized == "ANTHROPIC" else
+                               max(self.no_output_timeout or 0.0, 360.0) if normalized == "GOOGLE" else self.no_output_timeout),
             heartbeat_interval=self.heartbeat_interval,
             stdin_data=stdin_data,
         )
@@ -136,8 +141,8 @@ class TriadResearchRunner:
                 f"TIMEOUT: {normalized}: {result.timeout_reason}", retryable=True, meta=meta
             )
         if result.exit_code != 0:
-            error = (result.stderr or result.stdout or "provider call failed").strip()
-            message = f"{normalized} CLI exit {result.exit_code}: {error[:500]}"
+            from core.env_utils import cli_error_excerpt
+            message = f"{normalized} CLI exit {result.exit_code}: {cli_error_excerpt(result.stderr, result.stdout, 500)}"
             raise ResearchProviderCallError(message, retryable=self._is_retryable(message), meta=meta)
         output = result.stdout
         if normalized == "GOOGLE":

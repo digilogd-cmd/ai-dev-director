@@ -135,6 +135,8 @@ class MissionRunner:
             "profile": profile, "source": source, "request_id": request_id,            # None: the config budgets as they are
             # off | on_done | on_pass: whether the finished deliverable is applied to the project automatically
             "auto_apply": auto_apply or autopilot.setting(config, "auto_apply", "on_pass"),
+            # every AI call of the mission counts, failed ones too; 0 = no limit
+            "max_ai_calls": int(knobs.get("max_ai_calls", autopilot.setting(config, "max_ai_calls", 0)) or 0),
             "base_worktree": base_worktree, "continued_from": base_worktree,
             "summary": "", "blocked_reason": None, "owner_pid": None, "applied": None,
             "steps": [{"index": 1, "order": first_order.model_dump(), "entry_notes": list(notes or []),
@@ -229,7 +231,13 @@ class MissionRunner:
             result["treated_as"] = treated
             self.store.save(mission)
 
-        plan = self._plan(orch, mission)
+        spent = self._spent(mission)
+        cap = int(mission.get("max_ai_calls") or 0)
+        if cap and spent["calls"] >= cap:
+            return self._finish(mission, "INCOMPLETE",
+                                blocked=f"AI call budget used: {spent['calls']} calls (limit {cap}, autonomy.max_ai_calls). "
+                                        "The work so far is kept; continue the mission to spend another budget.")
+        plan = self._inline_plan(orch, mission, step) or self._plan(orch, mission)
         status = str(plan.get("status", "")).upper()
         if status == "DONE":
             return self._finish(mission, "DONE", summary=plan.get("summary") or plan.get("reason", ""))
@@ -301,6 +309,16 @@ class MissionRunner:
             orch._reserved_run_ids = set(getattr(orch, "_reserved_run_ids", set())) | {rid}
         self.notify(f"[미션 {step['index']}/{mission['max_steps']}] 실행 시작: {order.goal[:300]}", run_id=rid)
         try:
+            files = (orch._read_project_context(mission.get("base_worktree") or project) or {}).get("files") or []
+        except Exception:
+            files = []
+        orch.mission_context = {
+            "goal": mission["goal"], "step": step["index"], "max_steps": mission["max_steps"], "files": files,
+            "history": [{"step": s["index"], "goal": (s["order"].get("goal") or "")[:400],
+                         "result": (s.get("result") or {}).get("final_state"),
+                         "note": self._one_line(s["result"]) if s.get("result") else None}
+                        for s in mission["steps"] if s["index"] < step["index"]]}
+        try:
             orch.run(project, order.goal, run_id=rid, order=order, base_worktree=mission.get("base_worktree"))
         except Exception as exc:
             row = orch.sm.get_run(rid) or {}
@@ -319,6 +337,40 @@ class MissionRunner:
         return rid
 
     # ------------------------------------------------------------------ HEAD planning
+    @staticmethod
+    def _spent(mission: Dict[str, Any]) -> Dict[str, int]:
+        """AI calls and tokens this mission has used so far (every call, failed ones included)."""
+        try:
+            from core import usage
+            rows = usage.mission_calls(mission["mission_id"], limit=5000)
+            return {"calls": len(rows), "tokens": sum(int(r.get("tokens") or 0) for r in rows)}
+        except Exception:
+            return {"calls": 0, "tokens": 0}
+
+    def _inline_plan(self, orch, mission: Dict[str, Any], step: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """The next move HEAD already gave together with its PASS verdict, when that verdict is what the run ended
+        on. Anything else (the gate overrode the verdict, the answer had no usable plan, the ORDER contradicts
+        itself) returns None and the ordinary planning call runs."""
+        result = step.get("result") or {}
+        if result.get("final_state") != State.PASS or not step.get("run_id"):
+            return None
+        saved = orch._load_json(step["run_id"], "next_plan.json") or {}
+        plan = saved.get("plan")
+        if saved.get("decision") != "PASS" or not isinstance(plan, dict):
+            return None
+        status = str(plan.get("status", "")).upper()
+        if status == "CONTINUE":
+            try:
+                if autopilot.order_conflicts(OrderSchema(**(plan.get("order") or {}))):
+                    return None
+            except Exception:
+                return None
+        elif status != "DONE":
+            return None                       # BLOCKED and anything unexpected get the dedicated planning call
+        orch.sm.log_audit(step["run_id"], "ORCHESTRATOR", "MISSION_PLAN_INLINE",
+                          f"next move taken from the PASS verdict ({status}); no separate planning call")
+        return plan
+
     def _plan(self, orch, mission: Dict[str, Any]) -> Dict[str, Any]:
         history = [{"step": s["index"], "goal": s["order"].get("goal"),
                     "acceptance_criteria": s["order"].get("acceptance_criteria"),
@@ -407,6 +459,11 @@ class MissionRunner:
                 f"목표: {mission['goal'][:300]}\n{mission['summary'][:1500]}\n결과물 위치(작업본): {where}")
         if blocked:
             text += f"\n사유: {blocked[:600]}"
+        spent = self._spent(mission)
+        if spent["calls"]:
+            cap = int(mission.get("max_ai_calls") or 0)
+            text += (f"\n사용량: AI 호출 {spent['calls']}회" + (f" (한도 {cap}회)" if cap else "")
+                     + f", 약 {spent['tokens']:,} 토큰")
         self.notify(text, run_id=mission["steps"][-1].get("run_id"), role="HEAD")
         self._auto_apply(mission)
         return mission

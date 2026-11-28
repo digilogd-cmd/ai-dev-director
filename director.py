@@ -170,7 +170,7 @@ def mission(project: str, goal: str, mission_id: Optional[str], max_steps: Optio
             context["note"] = "Continuing from the latest mission deliverable; the listed files already exist there."
         from core import usage
         usage.set_context(stage="CHAT", run_id=None, mission_id=None)   # the ledger shows what this first HEAD call is
-        resp = orch.head.chat(goal, context, [])
+        resp = orch.head_chat(goal, context, [])
         if resp.get("type") != "DEV_TASK":
             click.echo(resp.get("message", ""))
             return

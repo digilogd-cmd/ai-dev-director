@@ -34,10 +34,12 @@ def setting(config: Optional[dict], key: str, default):
 # Execution profiles: how much process a request gets. "quick" is for small, well-understood changes (one or two
 # milestones, one correction round); "deep" is for ambitious goals. A profile only changes budgets, never the gates.
 PROFILE_DEFAULTS = {
-    "quick": {"max_steps": 2, "max_repairs": 1, "builder_attempts": 2, "max_consecutive_failures": 2},
-    "standard": {"max_steps": 6, "max_repairs": 3, "builder_attempts": 3, "max_consecutive_failures": 3},
-    "deep": {"max_steps": 12, "max_repairs": 3, "builder_attempts": 3, "max_consecutive_failures": 4},
+    "quick": {"max_steps": 2, "max_repairs": 1, "builder_attempts": 2, "max_consecutive_failures": 2, "max_ai_calls": 12},
+    "standard": {"max_steps": 6, "max_repairs": 3, "builder_attempts": 3, "max_consecutive_failures": 3, "max_ai_calls": 36},
+    "deep": {"max_steps": 12, "max_repairs": 3, "builder_attempts": 3, "max_consecutive_failures": 4, "max_ai_calls": 72},
 }
+# max_ai_calls (2026-11-28): the worst case in numbers. Measured on real missions: a clean milestone is 3 calls
+# (build, review, verdict+next); retries and failovers add to that. The mission stops at the limit and keeps its work.
 PROFILE_TAGS = {"[빠르게]": "quick", "[quick]": "quick", "[깊게]": "deep", "[deep]": "deep", "[표준]": "standard"}
 
 
@@ -47,7 +49,8 @@ def profile_overrides(config: Optional[dict], name: Optional[str]) -> dict:
         return {}
     merged = dict(PROFILE_DEFAULTS.get(name, {}))
     merged.update((setting(config, "profiles", {}) or {}).get(name) or {})
-    return {k: v for k, v in merged.items() if k in ("max_steps", "max_repairs", "builder_attempts", "max_consecutive_failures")}
+    return {k: v for k, v in merged.items()
+            if k in ("max_steps", "max_repairs", "builder_attempts", "max_consecutive_failures", "max_ai_calls")}
 
 
 def split_profile_tag(text: str):

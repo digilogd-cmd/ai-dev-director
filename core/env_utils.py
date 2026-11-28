@@ -74,6 +74,25 @@ def antigravity_enabled() -> bool:
     return bool((root_config().get("antigravity") or {}).get("enabled", True))
 
 
+_ERROR_HINTS = ("error", "limit", "quota", "not supported", "unauthorized", "denied", "expired", "failed", "unavailable")
+
+
+def cli_error_excerpt(stderr: Optional[str], stdout: Optional[str] = None, limit: int = 600) -> str:
+    """What a failed CLI actually complained about, short enough to survive every later truncation.
+    Codex prints its banner and the whole echoed prompt first and the error last, so keeping the first 500
+    characters kept none of the error (2026-11-28: 'model is not supported' was recorded as UNKNOWN and the dead
+    provider was called again on every milestone). The last line that looks like an error comes first, then the
+    tail of the output."""
+    text = (stderr or "").strip() or (stdout or "").strip()
+    if not text:
+        return "no output"
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    key = next((ln for ln in reversed(lines) if any(h in ln.lower() for h in _ERROR_HINTS)), "")
+    key = key[: limit // 2]
+    tail = " ".join(lines)[-(limit - len(key) - 3):]
+    return (key + " | " + tail) if key and key not in tail[-len(key) - 5:] else (key or tail)
+
+
 def resolve_cli(name: str) -> Optional[str]:
     """
     Discovers the official CLI executable from OS PATH or standard install locations.

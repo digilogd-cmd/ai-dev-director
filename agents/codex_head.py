@@ -150,7 +150,8 @@ class CodexHead(BaseHead):
             raise TimeoutError(f"TIMEOUT: Codex Head CLI exceeded limit: {res.timeout_reason}")
 
         if res.exit_code != 0:
-            err_msg = res.stderr.strip() or res.stdout.strip()
+            from core.env_utils import cli_error_excerpt
+            err_msg = cli_error_excerpt(res.stderr, res.stdout)
             self.logger.error(f"Codex CLI exited with code {res.exit_code}: {err_msg}")
             raise RuntimeError(f"Codex CLI execution failed (exit {res.exit_code}): {err_msg}")
 
@@ -237,14 +238,16 @@ class CodexHead(BaseHead):
             '  "decision": "PASS" | "HUMAN_REQUIRED" | "FAIL",\n'
             '  "rationale": string,\n'
             '  "next_steps": string[]\n'
-            "}\n\n"
-            f"RUN EVIDENCE:\n{json.dumps(evidence, indent=2)}\n\n"
+            "}\n"
+            + self.mission_prompt_block(kwargs.get("mission")) +
+            f"\nRUN EVIDENCE:\n{json.dumps(evidence, indent=2)}\n\n"
             "Respond ONLY with the JSON object. Do not include introductory text."
         )
 
         target_cwd = cwd or kwargs.get("worktree_path") or kwargs.get("project_path")
         raw_output = self._invoke_cli(prompt, cwd=target_cwd)
         data = self._extract_json(raw_output)
+        self.take_next_plan(data, kwargs.get("mission"))
         return DecisionSchema.model_validate(data)
 
     def chat(self, message: str, project_context: Dict[str, Any], history: list) -> Dict[str, Any]:

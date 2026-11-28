@@ -144,6 +144,34 @@ class Orchestrator:
     def _get_agent_domain(self, agent: Any) -> str:
         return ProviderManager.domain_for_provider(getattr(agent, "provider", ""))
 
+    def head_chat(self, message: str, project_context: Dict[str, Any], history: list) -> Dict[str, Any]:
+        """The first HEAD call of a mission (goal -> ORDER). It used to be the one HEAD call without failover: with the
+        configured HEAD out of quota the mission died with a traceback before it existed (2026-11-28). Under the HEAD
+        proxy another usable provider plays HEAD, and a provider that is down is recorded as down."""
+        tried, last = set(), None
+        for _ in range(3):
+            domain = self._get_agent_domain(self.head)
+            tried.add(domain)
+            try:
+                resp = self.head.chat(message, project_context, history)
+                self._record_provider_success(self.head)
+                return resp
+            except Exception as exc:
+                last = exc
+                err = str(exc)[:800]
+                try:
+                    if self.pm.classify_error(err) in self.PROVIDER_DOWN:
+                        self.pm.parse_cli_error(domain, err)
+                except Exception:
+                    pass
+                alt = autopilot.pick_alternative(self.pm, exclude=set(tried)) if self._proxy() else None
+                if alt is None:
+                    raise
+                logging.getLogger("director").warning("[FAILOVER] CHAT: HEAD %s -> %s (%s)", domain, self._domain_of(alt), err[:200])
+                self.head = self._init_head(alt)
+                self.current_head_name = self._domain_of(alt)
+        raise last
+
     def _record_provider_success(self, agent: Any) -> None:
         """A real CLI call by this agent finished with exit_code 0 -> provider verified (may promote RECOVERING/failed -> HEALTHY)."""
         domain = self._get_agent_domain(agent)
@@ -498,7 +526,7 @@ class Orchestrator:
             builder_result = self.builder.run(order, worktree_path, builder_fn=builder_fn)
         except Exception as e:
             builder_result = BuilderResultSchema(status="FAILED", files_modified=[], commands_run=[],
-                                                 summary="Builder raised an exception", error=f"BUILDER_EXCEPTION: {str(e)[:300]}")
+                                                 summary="Builder raised an exception", error=f"BUILDER_EXCEPTION: {str(e)[:700]}")
         self._save_json(run_id, "builder.json", builder_result)
         cli_evidence = getattr(self.builder, 'last_execution_info', None)
         if cli_evidence and builder_fn is None:
@@ -573,7 +601,7 @@ class Orchestrator:
                     builder_result = self.builder.run(attempt_order, worktree_path, builder_fn=None)
                 except Exception as e:
                     builder_result = BuilderResultSchema(status="FAILED", files_modified=[], commands_run=[],
-                                                         summary="Builder raised an exception", error=f"BUILDER_EXCEPTION: {str(e)[:300]}")
+                                                         summary="Builder raised an exception", error=f"BUILDER_EXCEPTION: {str(e)[:700]}")
                 cli_evidence = getattr(self.builder, 'last_execution_info', None)
                 if cli_evidence:
                     self._save_json(run_id, 'builder_cli.json', cli_evidence)
@@ -1010,8 +1038,14 @@ class Orchestrator:
             tried.add(domain)
             if self._provider_ready(self.head, run_id, "DECIDING", logger):
                 try:
-                    decision = self.head.decide(order, builder_result, verification, review_result, cwd=worktree_path)
+                    mission = getattr(self, "mission_context", None)
+                    extra = {"mission": mission} if mission else {}
+                    decision = self.head.decide(order, builder_result, verification, review_result, cwd=worktree_path, **extra)
                     self._record_provider_success(self.head)
+                    if mission:
+                        # the newest verdict of this run owns the file: a correction round overwrites it
+                        self._save_json(run_id, "next_plan.json", {"decision": decision.decision,
+                                                                   "plan": getattr(self.head, "last_next_plan", None)})
                     return decision, None
                 except Exception as e:
                     last_err = str(e)[:800]
@@ -1046,7 +1080,11 @@ class Orchestrator:
         independent (not both Claude / same agent family)."""
         reviewer_has_p0 = len(review_result.p0) > 0
         reviewer_has_p1 = len(review_result.p1) > 0
-        has_deletion_warning = any("remove" in s.lower() or "delet" in s.lower() for s in (review_result.p1 + review_result.p2))
+        # Only what the reviewer itself rated P1 can block. P2 notes used to be scanned for "remove"/"delet" too, so a
+        # project that HAS a delete command (2026-11-28: a ledger CLI, in two separate missions) lost a green milestone
+        # to a minor remark about that command. Real deletions are caught deterministically by the Scope Guard
+        # ("Unauthorized file deletion" / "Unauthorized deletion of existing"), not by this word match.
+        has_deletion_warning = any("remove" in s.lower() or "delet" in s.lower() for s in review_result.p1)
         final_state = decision.decision
         if final_state != State.PASS:
             return final_state

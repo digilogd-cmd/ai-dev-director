@@ -203,7 +203,8 @@ class CodexReviewer:
             )
 
         if res.exit_code != 0:
-            err_text = res.stderr or res.stdout
+            from core.env_utils import cli_error_excerpt
+            err_text = cli_error_excerpt(res.stderr, res.stdout, 800)
             self.logger.error(f"Codex CLI failed: {err_text}")
             return ReviewResultSchema(
                 verdict="changes_required",

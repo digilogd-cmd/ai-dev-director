@@ -845,7 +845,7 @@ def start_goal_mission(project_path: str, goal: str, profile: Optional[str] = No
             project_context["note"] = "Continuing from the latest mission deliverable (isolated worktree) of this project; the listed files already exist there."
         from core import usage
         usage.set_context(stage="CHAT", run_id=None, mission_id=None)
-        resp = orch.head.chat(goal, project_context, [])
+        resp = orch.head_chat(goal, project_context, [])
     except Exception as e:
         cm.add_message(sid, "SYSTEM", f"HEAD Error: {str(e)[:500]}")
         return {"status": "rejected", "error": "HEAD unavailable: " + str(e)[:300]}

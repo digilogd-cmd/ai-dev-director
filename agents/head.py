@@ -76,6 +76,43 @@ class BaseHead(ABC):
                   + '\n\nRespond ONLY with JSON: {"decision": "APPROVE" | "ESCALATE", "reason": "one sentence"}')
         return self._extract_json(self._invoke_cli(prompt, cwd=cwd))
 
+    # One call instead of two (2026-11-28). In a mission HEAD used to be asked twice in a row with the same evidence:
+    # "does this milestone pass?" and then "what is next?" - on two real missions those two calls were 53-60% of all
+    # tokens. When the mission supplies its context, the verdict prompt also asks for the next move; the answer is
+    # used only when the verdict stands as PASS (see MissionRunner._inline_plan), otherwise plan_next runs as before.
+    last_next_plan: Optional[Dict[str, Any]] = None
+
+    def mission_prompt_block(self, mission: Optional[Dict[str, Any]]) -> str:
+        if not mission:
+            return ""
+        import json
+        return (
+            "\nTHIS RUN IS MILESTONE " + str(mission.get("step")) + " OF A MISSION (budget " + str(mission.get("max_steps"))
+            + " milestones). If and only if your decision is PASS, also decide the mission's next move in the same "
+            "answer, as an extra top-level key \"next\":\n"
+            "- {\"status\": \"DONE\", \"summary\": ..., \"reason\": ...} when the mission goal's deliverables now exist "
+            "and this run's evidence shows they are tested and working. Do not add milestones for polish the user did "
+            "not ask for.\n"
+            "- {\"status\": \"CONTINUE\", \"summary\": ..., \"reason\": ..., \"order\": ORDER} with the next ORDER - one "
+            "focused, testable milestone that builds on the files of this run.\n"
+            "- {\"status\": \"BLOCKED\", \"reason\": ...} only for payments, credentials, live-money trading, "
+            "irreversible external actions or security.\n"
+            "\"summary\" is in Korean: what is done and what remains. ORDER schema: " + self.ORDER_SCHEMA_TEXT + "\n"
+            "ORDER rules: repo-relative paths only; never .git/.agents/GEMINI.md; behavior tests in required_outputs; "
+            "max_files_changed <= 15 and max_diff_lines <= 1500; reference_paths ONLY for absolute paths of external "
+            "documents the user supplied; every file in required_outputs must be inside allowed_paths and must NOT "
+            "match protected_paths; risk_level HIGH only for the escalation categories.\n"
+            "With decision FAIL or HUMAN_REQUIRED omit \"next\".\n"
+            "MISSION GOAL:\n" + str(mission.get("goal") or "") + "\n"
+            "EARLIER MILESTONES:\n" + json.dumps(mission.get("history") or [], ensure_ascii=False, default=str)[:6000] + "\n"
+            "PROJECT FILES BEFORE THIS RUN:\n" + json.dumps(mission.get("files") or [], ensure_ascii=False, default=str)[:4000] + "\n\n"
+        )
+
+    def take_next_plan(self, data: Dict[str, Any], mission: Optional[Dict[str, Any]]) -> None:
+        """Pops the optional 'next' key out of a verdict answer and keeps it for the mission."""
+        plan = data.pop("next", None) if isinstance(data, dict) else None
+        self.last_next_plan = plan if (mission and isinstance(plan, dict)) else None
+
     def plan_next(self, mission_goal: str, history: list, project_context: Dict[str, Any],
                   cwd: Optional[str] = None) -> Dict[str, Any]:
         """Goal-oriented step planning. Returns {'status': 'DONE'|'CONTINUE'|'BLOCKED', 'summary', 'reason',
